@@ -7,6 +7,7 @@ func main() {
 	// 也就是return之后添加一个函数调用。defer通常用来释放函数内部变量,确保数据库关闭。
 	defer bc.db.Close()
 
+	//test git
 	cli := CLI{bc}
 	cli.run()
 }
