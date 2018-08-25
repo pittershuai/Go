@@ -2,13 +2,11 @@ package main
 
 func main() {
 	bc := NewBlockchain()
-	bc.AddBlock("Send 1 BTC to Ivan")
-	bc.AddBlock("Send 2 BTC to Ivan")
 
-	//对于数组range返回（下标值，值）
+	//defer代码块会在函数调用链表中增加一个函数调用。这个函数调用不是普通的函数调用，而是会在函数正常返回，
+	// 也就是return之后添加一个函数调用。defer通常用来释放函数内部变量,确保数据库关闭。
+	defer bc.db.Close()
 
-	//for _, block := range bc.blocks {
-	//	pow := newProofOfWord(block)
-	//	fmt.Println(pow.Validate())
-	//}
+	cli := CLI{bc}
+	cli.run()
 }

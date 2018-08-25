@@ -15,6 +15,16 @@ type BlockChain struct {
 	db  *bolt.DB
 }
 
+/**
+用于输出区块链中区块的迭代器结构体
+当前区块的hash：用于在数据中找到结构体
+数据库链接:需要在数据库中用hash找block，所以需要这个链接
+*/
+type BlockchainIterator struct {
+	currentHash []byte
+	db          *bolt.DB
+}
+
 func (bc *BlockChain) AddBlock(data string) {
 	var lastHash []byte
 
@@ -34,6 +44,7 @@ func (bc *BlockChain) AddBlock(data string) {
 		b := tx.Bucket([]byte(blocksBucket))
 
 		err = b.Put(newBlock.Hash, newBlock.Serialize())
+
 		if err != nil {
 			log.Panic(err)
 		}
@@ -52,6 +63,34 @@ func (bc *BlockChain) AddBlock(data string) {
 		log.Panic(err)
 	}
 
+}
+
+/**
+放在BlockChain结构体中，创建迭代器。因为每个迭代器应该依附于blockchain。
+即每个blockchain创建的时候都应该有含有一个迭代器
+*/
+func (bc *BlockChain) Iterator() *BlockchainIterator {
+	return &BlockchainIterator{bc.tip, bc.db}
+}
+
+/**
+
+ */
+func (i *BlockchainIterator) next() *Block {
+	var block *Block
+	err := i.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(blocksBucket))
+		encodedBlock := b.Get(i.currentHash)
+		block = DeserializeBlock(encodedBlock)
+
+		return nil
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+	i.currentHash = block.PrevBlockHash
+
+	return block
 }
 
 //创建区块链。该方法是从无到有创建区块链。创建创世区块

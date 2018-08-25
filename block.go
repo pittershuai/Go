@@ -12,7 +12,7 @@ type Block struct {
 	PrevBlockHash []byte
 	Data          []byte
 	Hash          []byte
-	nonce         int
+	Nonce         int //Nonce写为nonce导致错误（还是不报错的错误）,命名也是很重要的
 }
 
 // Serialize serializes the block
@@ -34,8 +34,7 @@ func NewBlock(data string, prevBlockHash []byte) *Block {
 	pow := newProofOfWord(block)
 	nonce, hash := pow.Run() //删除setHash()通过pow计算出hash
 	block.Hash = hash
-	block.nonce = nonce
-
+	block.Nonce = nonce
 	return block
 }
 
