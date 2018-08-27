@@ -9,9 +9,8 @@ import (
 	"strconv"
 )
 
-type CLI struct {
-	bc *BlockChain
-}
+//去除CLI结构体中的数据库链接db，解耦？数据库链接的事情全部交给blockchain
+type CLI struct {}
 
 func (cli *CLI) validateArgs() {
 	if len(os.Args) < 2 {
@@ -20,24 +19,51 @@ func (cli *CLI) validateArgs() {
 	}
 }
 func (cli *CLI) printUsage() {
-	fmt.Println("Usage")
-	fmt.Println(" addblock -data BLOCK_DATA - add a block to the blockchain")
-	fmt.Println(" printchain - print all the blocks of the blockchain")
+	fmt.Println("Usage:")
+	fmt.Println("  getbalance -address ADDRESS - Get balance of ADDRESS")
+	fmt.Println("  createblockchain -address ADDRESS - Create a blockchain and send genesis block reward to ADDRESS")
+	fmt.Println("  printchain - Print all the blocks of the blockchain")
+	fmt.Println("  send -from FROM -to TO -amount AMOUNT - Send AMOUNT of coins from FROM address to TO")
 }
-func (cli *CLI) addBlock(data string) {
-	cli.bc.AddBlock(data)
+
+//func (cli *CLI) addBlock(data string) {
+//	//cli.bc.AddBlock(data)  //替换为send中MineBlock
+//}
+
+/*
+添加了交易后，将以前的简单AddBlock()替换为MineBlock().
+mine只有在进行交易时进行,此时只是每个区块中含有一个交易
+ */
+func (cli *CLI) send(from, to string, amount int) {
+	bc := NewBlockchain()
+	defer bc.db.Close()
+
+	tx := NewUTXOTransaction(from, to, amount, bc)
+	bc.MineBlock([]*Transaction{tx})
+	fmt.Println("Success!")
+}
+
+func (cli *CLI) createBlockchain(address string) {
+	bc := CreateBlockchain(address) //?不将此bc赋值到cli中？
+	bc.db.Close()
+	fmt.Println("Done!")
+
 }
 
 /**
 通过迭代器打印区块链信息
 */
 func (cli *CLI) printChain() {
-	bi := cli.bc.Iterator()
+
+	bc := NewBlockchain()
+	defer bc.db.Close()
+	bi := bc.Iterator()
+
 	for {
 		block := bi.next()
 
 		fmt.Printf("Prev. hash: %x\n", block.PrevBlockHash)
-		fmt.Printf("Data: %s\n", block.Data)
+		fmt.Printf("Data: %s\n", block.HashTransactions())
 		fmt.Printf("nonce: %d\n", block.Nonce)
 		fmt.Printf("Hash: %x\n", block.Hash)
 
@@ -52,23 +78,52 @@ func (cli *CLI) printChain() {
 
 }
 
+//获得账户余额
+func (cli *CLI) getBalance(address string) {
+	bc := NewBlockchain() //NewBlockchain()与CreateBlockchain()的区别
+	defer bc.db.Close()
+
+	balance := 0
+	UTXOs := bc.FindUTXO(address)
+
+	for _, out := range UTXOs {
+		balance += out.Value
+	}
+
+	fmt.Printf("Balance of '%s': %d\n", address, balance)
+}
+
+
 func (cli *CLI) run() {
 	cli.validateArgs()
 
-	// NewFlagSet的第一个参数是可以任意定的.但第二个参数,则决定了参数解析出错时错误处理方式.
-	//分为两步1：让命令行识别命令名称，2：得到命令名称后相应参数的值
-
-	addBlockCmd := flag.NewFlagSet("addblock", flag.ExitOnError) //可以理解为在命令行中注册了addblock，让命令行能识别
+	createBlockchainCmd := flag.NewFlagSet("createblockchain", flag.ExitOnError)
+	sendCmd := flag.NewFlagSet("send", flag.ExitOnError)
+	getBalanceCmd := flag.NewFlagSet("getbalance", flag.ExitOnError)
 	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
 
-	//将输入中blockchain_go addblock -data “。。。。” name为data，返回data后字符串的指针
-	addBlockData := addBlockCmd.String("data", "", "Block data")
 
-	//先运行 go build，生成blockchain_go.exe文件
-	//再执行blockchain_go printchain 或 再执行blockchain_go addblock -data “。。。。”
+
+	createBlockchainAddress := createBlockchainCmd.String("address", "", "The address to send genesis block reward to")
+	//sendCmd 有两个参数，分别接受参数后数据
+	sendFrom := sendCmd.String("from", "", "Source wallet address")
+	sendTo := sendCmd.String("to", "", "Destination wallet address")
+	getBalanceAddress := getBalanceCmd.String("address", "", "The address to get balance for")
+	sendAmount := sendCmd.Int("amount", 0, "Amount to send")
+
 	switch os.Args[1] {
-	case "addblock":
-		err := addBlockCmd.Parse(os.Args[2:])
+	case "createblockchain":
+		err := createBlockchainCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "send":
+		err := sendCmd.Parse(os.Args[2:])
+		if err != nil {
+			log.Panic(err)
+		}
+	case "getbalance":
+		err := getBalanceCmd.Parse(os.Args[2:])
 		if err != nil {
 			log.Panic(err)
 		}
@@ -81,16 +136,32 @@ func (cli *CLI) run() {
 		cli.printUsage()
 		os.Exit(1)
 	}
-	//是否使用addBlockCmd解析过参数
-	if addBlockCmd.Parsed() {
-		if *addBlockData == "" {
-			addBlockCmd.Usage()
+	if getBalanceCmd.Parsed() {
+		if *getBalanceAddress == "" {
+			getBalanceCmd.Usage()
 			os.Exit(1)
 		}
-		cli.addBlock(*addBlockData) //addBlockData,*为取值操作
+		cli.getBalance(*getBalanceAddress)
 	}
+
+	if createBlockchainCmd.Parsed() {
+		if *createBlockchainAddress == "" {
+			createBlockchainCmd.Usage()
+			os.Exit(1)
+		}
+		cli.createBlockchain(*createBlockchainAddress)
+	}
+
 	if printChainCmd.Parsed() {
 		cli.printChain()
 	}
 
+	if sendCmd.Parsed() {
+		if *sendFrom == "" || *sendTo == "" || *sendAmount <= 0 {
+			sendCmd.Usage()
+			os.Exit(1)
+		}
+
+		cli.send(*sendFrom, *sendTo, *sendAmount)
+	}
 }
