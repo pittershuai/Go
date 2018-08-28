@@ -43,9 +43,12 @@ func NewCoinbaseTX(to,data string)  *Transaction{
 	if data == ""{
 		data = fmt.Sprintf("Reward to '%s'", to)
 	}
-	txin := TXInput{[]byte{},-1,data} //ScriptSig 传data？
-	txout := TXOutput{subsidy,to} //ScriptPubKey 传接受者地址？
-	return &Transaction{nil,[]TXInput{txin},[]TXOutput{txout}}
+	//挖矿得到的block中的TXInput是没有信息的，所以在PubKey中放点信息也是OK的。
+	txin := TXInput{[]byte{},-1,nil,[]byte(data)}
+	txout := NewTXOutput(subsidy,to)
+	tx := Transaction{nil,[]TXInput{txin},[]TXOutput{*txout}}
+	tx.setID()
+	return &tx
 }
 
 // NewUTXOTransaction creates a new transaction
@@ -53,7 +56,14 @@ func NewUTXOTransaction(from,to string,amount int,bc *BlockChain) *Transaction{
 	var inputs []TXInput
 	var outputs []TXOutput
 
-	acc, validOutputs := bc.FindSpendableOutputs(from, amount)
+	wallets, err := NewWallets()
+	if err != nil {
+		log.Panic(err)
+	}
+	wallet := wallets.GetWallet(from)
+	pubKeyHash := HashPubKey(wallet.PublicKey)
+
+	acc, validOutputs := bc.FindSpendableOutputs(pubKeyHash, amount)
 
 	if acc < amount {
 		log.Panic("ERROR: Not enough funds")
@@ -66,16 +76,16 @@ func NewUTXOTransaction(from,to string,amount int,bc *BlockChain) *Transaction{
 		}
 
 		for _, out := range outs {
-			input := TXInput{txID, out, from}
+			input := TXInput{txID, out, nil,wallet.PublicKey}
 			inputs = append(inputs, input)
 		}
 	}
 
 	// Build a list of outputs
-	outputs = append(outputs, TXOutput{amount, to})
+	outputs = append(outputs, *NewTXOutput(amount,to))
 	//找零，生成能被支付方解锁(spend)的output
 	if acc > amount {
-		outputs = append(outputs, TXOutput{acc - amount, from}) // a change
+		outputs = append(outputs, *NewTXOutput(acc - amount,from))
 	}
 
 	tx := Transaction{nil, inputs, outputs}
@@ -83,24 +93,3 @@ func NewUTXOTransaction(from,to string,amount int,bc *BlockChain) *Transaction{
 
 	return &tx
 }
-
-type TXInput struct {
-	Txid []byte  //存储引用output所在的transaction的ID
-	Vout int   	//存储引用的output在transaction的TXOutput数组中下标值
-	ScriptSig string
-}
-//价值被存在TXOutput 中，TXInput只是对输出的引用
-type TXOutput struct {
-	Value int          //又因为将Value命名为value导致错误
-	ScriptPubKey string
-}
-
-//检查input能否被提供的。。。与下一个函数到底什么区别？没理解
-func(in *TXInput) CanUnlockOutputWith(unlockingData string) bool{
-	return (in.ScriptSig == unlockingData)
-}
-//检查output能否被提供的秘钥（此时为简单字符串）解锁
-func(out TXOutput) CanBeUnlockedWith(unlockingData string)  bool{
-	return (out.ScriptPubKey == unlockingData)
-}
-

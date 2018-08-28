@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"encoding/hex"
+	"bytes"
+	"errors"
 )
 
 const dbFile = "blockchain.db" //数据库文件
@@ -67,12 +69,34 @@ func(bc *BlockChain) MineBlock(transactions []*Transaction) {
 		log.Panic(err)
 	}
 }
+
+// FindTransaction finds a transaction by its ID
+func (bc *BlockChain) FindTransaction(ID []byte) (Transaction, error) {
+	bci := bc.Iterator()
+
+	for {
+		block := bci.next()
+
+		for _, tx := range block.Tracsactions {
+			if bytes.Compare(tx.ID, ID) == 0 {
+				return *tx, nil
+			}
+		}
+
+		if len(block.PrevBlockHash) == 0 {
+			break
+		}
+	}
+
+	return Transaction{}, errors.New("Transaction is not found")
+}
+
 /**
 returns a list of transactions containing unspent outputs
 通过全部遍历的方式，遍历每个block中的每个Transaction中的每个TXOutput 和 TXInput。
 只要发现Output被引用过（spend）就跳过循环。
 */
-func(bc *BlockChain) FindUnspentTransactions(address string)  []Transaction{
+func(bc *BlockChain) FindUnspentTransactions(pubKeyHash []byte)  []Transaction{
 	bci := bc.Iterator()
 	var unspentTXs []Transaction
 	//键为：被引用过的交易的hash（hash被转为string），
@@ -85,10 +109,9 @@ func(bc *BlockChain) FindUnspentTransactions(address string)  []Transaction{
 
 		for _,tx := range block.Tracsactions{
 			txID := hex.EncodeToString(tx.ID) //将byte数组转为string类型
-
 		Outputs:
 			for outIdx,out := range tx.Vout{
-				// 该交易中是否有Output被引用（spend）过？
+				// 该交易中是否有Output被引用（spend）过。 这个判断能进去吗？spentTXOs[txID]没有被赋值应该一直为空啊。
 				if spentTXOs[txID] != nil{
 					//通过遍历被引用过的交易中被引用过的output，若发现spentTXOs[txID]有该记录则跳过
 					for _,spentOut := range spentTXOs[txID]{
@@ -98,7 +121,7 @@ func(bc *BlockChain) FindUnspentTransactions(address string)  []Transaction{
 					}
 				}
 
-				if out.CanBeUnlockedWith(address) {
+				if out.IsLockedWithKey(pubKeyHash) {
 					unspentTXs = append(unspentTXs, *tx)
 				}
 			}
@@ -106,7 +129,7 @@ func(bc *BlockChain) FindUnspentTransactions(address string)  []Transaction{
 			//只要不是coinbase就一定有input，记录到spentTXOs中
 			if tx.IsCoinbase() == false{
 				for _,in := range tx.Vin{
-					if in.CanUnlockOutputWith(address){
+					if in.UsesKey(pubKeyHash){
 						intxID := hex.EncodeToString(in.Txid)
 						spentTXOs[intxID] = append(spentTXOs[intxID], in.Vout)
 					}
@@ -125,9 +148,9 @@ func(bc *BlockChain) FindUnspentTransactions(address string)  []Transaction{
 // finds and returns unspent outputs to reference in inputs
 //找到某地址上足够数目的UTXO即可停止，用于支付时调用吧
 //返回支付的金额（包含找零的那部分），已经引用到哪些交易中的那些output
-func (bc *BlockChain) FindSpendableOutputs(address string, amount int) (int, map[string][]int) {
+func (bc *BlockChain) FindSpendableOutputs(pubKeyHash []byte, amount int) (int, map[string][]int) {
 	unspentOutputs := make(map[string][]int)
-	unspentTXs := bc.FindUnspentTransactions(address)
+	unspentTXs := bc.FindUnspentTransactions(pubKeyHash)
 	accumulated := 0
 
 Work:
@@ -135,7 +158,7 @@ Work:
 		txID := hex.EncodeToString(tx.ID)
 
 		for outIdx, out := range tx.Vout {
-			if out.CanBeUnlockedWith(address) && accumulated < amount {
+			if out.IsLockedWithKey(pubKeyHash) && accumulated < amount {
 				accumulated += out.Value
 				unspentOutputs[txID] = append(unspentOutputs[txID], outIdx)
 
@@ -152,13 +175,13 @@ Work:
 // FindUTXO finds and returns all unspent transaction outputs
 //用于查询余额时调用吧
 //返回该地址上所有可引用的output（即总资产）
-func (bc *BlockChain) FindUTXO(address string) []TXOutput {
+func (bc *BlockChain) FindUTXO(pubKeyHash []byte) []TXOutput {
 	var UTXOs []TXOutput
-	unspentTransactions := bc.FindUnspentTransactions(address)
+	unspentTransactions := bc.FindUnspentTransactions(pubKeyHash)
 
 	for _, tx := range unspentTransactions {
 		for _, out := range tx.Vout {
-			if out.CanBeUnlockedWith(address) {
+			if out.IsLockedWithKey(pubKeyHash) {
 				UTXOs = append(UTXOs, out)
 			}
 		}
