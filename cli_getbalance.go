@@ -11,6 +11,9 @@ func (cli *CLI) getBalance(address string) {
 		log.Panic("ERROR: Address is not valid")
 	}
 	bc := NewBlockchain() //NewBlockchain()与CreateBlockchain()的区别
+
+	//一直等到包含defer语句的函数执行完毕时，延迟函数（defer后的函数）才会被执行，
+	// 而不管包含defer语句的函数是通过return的正常结束，还是由于panic导致的异常结束。
 	defer bc.db.Close()
 
 	balance := 0
