@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/gob"
+	"log"
 )
 
 //价值被存在TXOutput 中，TXInput只是对输出的引用
@@ -9,11 +11,6 @@ type TXOutput struct {
 	Value int          //又因为将Value命名为value导致错误
 	PubKeyHash []byte
 }
-
-//检查output能否被提供的秘钥（此时为简单字符串）解锁
-//func(out TXOutput) CanBeUnlockedWith(unlockingData string)  bool{
-//	return (out.ScriptPubKey == unlockingData)
-//}
 
 /*
 给output上锁 (使用address所含有的pubKey，将该pubKey经hash后上锁)
@@ -38,6 +35,39 @@ func NewTXOutput(value int ,address string)  *TXOutput{
 	txo := &TXOutput{value, nil}
 	txo.lock([]byte(address))
 	return txo
+}
+
+/**
+为了装多个TXOutput，并进行序列化，反序列化。这个结构体有必要吗？
+ */
+type TXOutputs struct {
+	Outputs []TXOutput
+}
+
+// Serialize serializes TXOutputs
+func (outs TXOutputs) Serialize() []byte {
+	var buff bytes.Buffer
+
+	enc := gob.NewEncoder(&buff)
+	err := enc.Encode(outs)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return buff.Bytes()
+}
+
+// DeserializeOutputs deserializes TXOutputs
+func DeserializeOutputs(data []byte) TXOutputs {
+	var outputs TXOutputs
+
+	dec := gob.NewDecoder(bytes.NewReader(data))
+	err := dec.Decode(&outputs)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return outputs
 }
 
 

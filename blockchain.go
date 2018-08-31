@@ -36,7 +36,7 @@ type BlockchainIterator struct {
 往blockchain中添加block
 由以前的addBlock改名为MineBlock
  */
-func(bc *BlockChain) MineBlock(transactions []*Transaction) {
+func(bc *BlockChain) MineBlock(transactions []*Transaction) *Block{
 	var lastHash []byte
 
 	for _, tx := range transactions {
@@ -48,23 +48,24 @@ func(bc *BlockChain) MineBlock(transactions []*Transaction) {
 	err := bc.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(blocksBucket))
 		lastHash = b.Get([]byte("l"))
+
 		return nil
 	})
-
-	if err!=nil{
+	if err != nil {
 		log.Panic(err)
 	}
 
-	newBlock := NewBlock(transactions,lastHash)
+	newBlock := NewBlock(transactions, lastHash)
 
 	err = bc.db.Update(func(tx *bolt.Tx) error {
-		b:= tx.Bucket([]byte(blocksBucket))
-		err = b.Put(newBlock.Hash,newBlock.Serialize())
-		if err!=nil{
+		b := tx.Bucket([]byte(blocksBucket))
+		err := b.Put(newBlock.Hash, newBlock.Serialize())
+		if err != nil {
 			log.Panic(err)
 		}
-		err = b.Put([]byte("l"),newBlock.Hash)
-		if err!=nil{
+
+		err = b.Put([]byte("l"), newBlock.Hash)
+		if err != nil {
 			log.Panic(err)
 		}
 
@@ -72,10 +73,11 @@ func(bc *BlockChain) MineBlock(transactions []*Transaction) {
 
 		return nil
 	})
-
-	if err!=nil{
+	if err != nil {
 		log.Panic(err)
 	}
+
+	return newBlock
 }
 
 // FindTransaction finds a transaction by its ID
@@ -180,22 +182,56 @@ Work:
 	return accumulated, unspentOutputs
 }
 
-// FindUTXO finds and returns all unspent transaction outputs
-//用于查询余额时调用吧
-//返回该地址上所有可引用的output（即总资产）
-func (bc *BlockChain) FindUTXO(pubKeyHash []byte) []TXOutput {
-	var UTXOs []TXOutput
-	unspentTransactions := bc.FindUnspentTransactions(pubKeyHash)
+// FindUTXO finds all unspent transaction outputs and returns transactions with spent outputs removed
+//方法为寻找整个blockchain中的所有TUXO，UTXO_set.go中为寻找指定address下的UTXO。
+func (bc *BlockChain) FindUTXO() map[string]TXOutputs {
+	//key:transaction的id（byte[] 转为 string）
+	//value:transation中未spend过的全部output
+	UTXO := make(map[string]TXOutputs)
+	//key:同上
+	//value:transaton 中Vout数组的index
+	spentTXOs := make(map[string][]int)
+	bci := bc.Iterator()
 
-	for _, tx := range unspentTransactions {
-		for _, out := range tx.Vout {
-			if out.IsLockedWithKey(pubKeyHash) {
-				UTXOs = append(UTXOs, out)
+	for {
+		block := bci.next()
+
+		//按照此逻辑，最后一个transaction中的output一定是没有被引用过的。
+		//因为每个block中只包含一个transaction。
+		for _, tx := range block.Tracsactions {
+			txID := hex.EncodeToString(tx.ID)
+
+		Outputs:
+			for outIdx, out := range tx.Vout {
+				if spentTXOs[txID] != nil {
+					for _, spentOutIdx := range spentTXOs[txID] {
+						if spentOutIdx == outIdx {
+							continue Outputs
+						}
+					}
+				}
+
+				outs := UTXO[txID]
+				outs.Outputs = append(outs.Outputs, out)
+				UTXO[txID] = outs
 			}
+
+			//只要是非coinbase的transaction，其他的tx都会有input
+			if tx.IsCoinbase() == false {
+				for _, in := range tx.Vin {
+					inTxID := hex.EncodeToString(in.Txid)
+					//将被引用过的transaction的output记录在spentTXOs中
+					spentTXOs[inTxID] = append(spentTXOs[inTxID], in.Vout)
+				}
+			}
+		}
+
+		if len(block.PrevBlockHash) == 0 {
+			break
 		}
 	}
 
-	return UTXOs
+	return UTXO
 }
 
 
@@ -214,6 +250,7 @@ func (bc *BlockChain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey)
 
 	for _, vin := range tx.Vin {
 		prevTX, err := bc.FindTransaction(vin.Txid)
+		fmt.Println("++++++++++++++++++++++++++++")
 		if err != nil {
 			log.Panic(err)
 		}
@@ -225,6 +262,11 @@ func (bc *BlockChain) SignTransaction(tx *Transaction, privKey ecdsa.PrivateKey)
 
 // VerifyTransaction verifies transaction input signatures
 func (bc *BlockChain) VerifyTransaction(tx *Transaction) bool {
+	//若为coinbase不用进行验证交易。
+	if tx.IsCoinbase(){
+		return true
+	}
+
 	prevTXs := make(map[string]Transaction)
 
 	for _, vin := range tx.Vin {
@@ -261,6 +303,8 @@ func (i *BlockchainIterator) next() *Block {
 
 
 //为什么同时存在 CreateBlockchain()这个方法？
+//CreateBlockchain()用于创世。
+// NewBlockchain可以理解为在程序中得到已经存在于bolt数据库中的blockchain
 func NewBlockchain() *BlockChain {
 	if dbExists() == false {
 		fmt.Println("No existing blockchain found. Create one first.")

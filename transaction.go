@@ -41,6 +41,7 @@ func(tx *Transaction) setID()  {
 
 // Sign signs each input of a Transaction
 func (tx *Transaction) Sign(privKey ecdsa.PrivateKey, prevTXs map[string]Transaction) {
+	//不对coinbase的tx进行签名，因为没有有效input
 	if tx.IsCoinbase() {
 		return
 	}
@@ -188,7 +189,13 @@ func (tx Transaction) Serialize() []byte {
 func NewCoinbaseTX(to,data string)  *Transaction{
 
 	if data == ""{
-		data = fmt.Sprintf("Reward to '%s'", to)
+		randData := make([]byte, 20)
+		_, err := rand.Read(randData)
+		if err != nil {
+			log.Panic(err)
+		}
+
+		data = fmt.Sprintf("%x", randData)
 	}
 	//挖矿得到的block中的TXInput是没有信息的，所以在PubKey中放点信息也是OK的。
 	txin := TXInput{[]byte{},-1,nil,[]byte(data)}
