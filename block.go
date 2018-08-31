@@ -5,7 +5,6 @@ import (
 	"encoding/gob"
 	"log"
 	"time"
-	"crypto/sha256"
 )
 
 type Block struct {
@@ -34,13 +33,14 @@ func (b *Block) Serialize() []byte {
 这个函数为啥绑定在Block上？——看看POW中的调用就懂了
  */
 func(b* Block) HashTransactions()  []byte{
-	var txHashes [][]byte
-	var txHash [32]byte
+	var transations [][]byte
+
 	for _,tx := range b.Tracsactions{
-		txHashes = append(txHashes,tx.ID)
+		transations = append(transations,tx.ID)
 	}
-	txHash = sha256.Sum256(bytes.Join(txHashes,[]byte{}))
-	return txHash[:]
+	mTree := NewMerkleTree(transations)
+
+ 	return mTree.RootNode.Data
 }
 
 func NewBlock(transations []*Transaction, prevBlockHash []byte) *Block {
